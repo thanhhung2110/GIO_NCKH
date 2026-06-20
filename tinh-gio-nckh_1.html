@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tính giờ NCKH — UEL (QĐ 1142)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>html,body{margin:0;background:#f6f7fb}</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+
+/*
+  CÔNG CỤ TÍNH GIỜ NCKH — Trường ĐH Kinh tế - Luật (UEL)
+  Theo Quyết định 1142/QĐ-ĐHKTL và bảng công thức quy đổi.
+
+  Hằng số:
+  - Giờ chuẩn NCKH định mức: 195 giờ/năm
+  - Giờ làm việc hành chính quy đổi: 586 giờ/năm
+  - Hệ số chênh lệch (giờ làm việc -> giờ chuẩn): 586/195 = 3.005
+
+  Quy tắc chia tác giả với công trình quy đổi nhiều người (n = tổng số thành viên):
+  - Tác giả chính / Chủ nhiệm:                1/3*T + (2/3*T)/n
+  - Tác giả 1 hoặc tác giả liên hệ (bài báo): 1/6*T + (2/3*T)/n
+  - Đồng tác giả / Thành viên:                (2/3*T)/n
+*/
+
+const GIO_CHUAN_DINH_MUC = 195;
+const HE_SO = 586 / 195; // 3.005
+
+// Vai trò chia giờ
+const VAITRO = {
+  CHINH: "Tác giả chính / Chủ nhiệm",
+  TG1: "Tác giả 1 hoặc tác giả liên hệ",
+  DONG: "Đồng tác giả / Thành viên",
+  CANHAN: "Cá nhân (không chia)",
+};
+
+// Nhóm hạng mục. Mỗi item: { label, total, roles }
+// roles: mảng các vai trò áp dụng. "canhan" = giá trị cố định, không chia n.
+const ROLES_FULL = ["CHINH", "TG1", "DONG"]; // bài báo, sách: 3 vai trò
+const ROLES_DT = ["CHINH", "DONG"]; // đề tài: chủ nhiệm + thành viên
+
+const DATA = [
+  {
+    group: "1. Đề xuất đề tài / thuyết minh thành công",
+    note: "Giá trị cố định cho chủ nhiệm/người đề xuất.",
+    canhanOnly: true,
+    items: [
+      { label: "Cấp nhà nước", canhan: 100 },
+      { label: "Cấp bộ / tỉnh / ngành", canhan: 50 },
+    ],
+  },
+  {
+    group: "2. Chuẩn bị thuyết minh đề tài NCKH (gửi tham gia tuyển chọn)",
+    note: "Chủ nhiệm hưởng phần cố định; thành viên khác chia đều phần còn lại theo (n-1).",
+    tuyenchon: true,
+    items: [
+      { label: "Cấp ĐHQG - loại A", total: 800, cn: 400, tv: 400 },
+      { label: "Cấp ĐHQG - loại B", total: 600, cn: 300, tv: 300 },
+      { label: "Cấp ĐHQG - loại C", total: 400, cn: 200, tv: 200 },
+      { label: "Cấp quốc tế", total: 800, cn: 400, tv: 400 },
+      { label: "Cấp cơ sở", total: 200, cn: 100, tv: 100 },
+      { label: "Cấp nhà nước", total: 400, cn: 400, tv: 400 },
+      { label: "Cấp bộ / ngành", total: 600, cn: 300, tv: 300 },
+      { label: "Cấp tỉnh", total: 400, cn: 200, tv: 200 },
+    ],
+  },
+  {
+    group: "3. Đề tài hoàn thành (không có sản phẩm công bố)",
+    note: "Chủ nhiệm: 1/3·T + (2/3·T)/n. Thành viên: (2/3·T)/n. Nếu nghiệm thu loại Tốt+: chủ nhiệm thưởng thêm 10%.",
+    roles: ROLES_DT,
+    bonus10: true,
+    treHan: true,
+    items: [
+      { label: "Cấp ĐHQG - loại A", total: 3600 },
+      { label: "Cấp ĐHQG - loại B", total: 1800 },
+      { label: "Cấp ĐHQG - loại C", total: 1200 },
+      { label: "Cấp quốc tế (≈ĐHQG loại B)", total: 1800 },
+      { label: "Cấp cơ sở", total: 600 },
+      { label: "Cấp nhà nước", total: 3600 },
+      { label: "Cấp bộ / ngành", total: 1800 },
+      { label: "Cấp tỉnh", total: 1800 },
+    ],
+  },
+  {
+    group: "4. Bài báo trong nước",
+    note: "Theo điểm Hội đồng GSNN.",
+    roles: ROLES_FULL,
+    items: [
+      { label: "Tạp chí điểm ≥ 2,0", total: 3600 },
+      { label: "Tạp chí điểm đến 1,5", total: 1800 },
+      { label: "Tạp chí điểm đến 1,25", total: 1500 },
+      { label: "Tạp chí điểm đến 1,0", total: 1200 },
+      { label: "Tạp chí điểm đến 0,75", total: 900 },
+      { label: "Tạp chí điểm đến 0,5", total: 600 },
+      { label: "Tạp chí điểm đến 0,25", total: 300 },
+      { label: "Tạp chí khác có ISSN", total: 200 },
+    ],
+  },
+  {
+    group: "5. Bài báo quốc tế",
+    note: "Theo xếp hạng tạp chí.",
+    roles: ROLES_FULL,
+    items: [
+      { label: "SSCI/SCIE Q1", total: 2400 },
+      { label: "SSCI/SCIE Q2", total: 1800 },
+      { label: "SSCI/SCIE Q3", total: 1500 },
+      { label: "SSCI/SCIE Q4", total: 1200 },
+      { label: "Scopus Q1", total: 2400 },
+      { label: "Scopus Q2", total: 1800 },
+      { label: "Scopus Q3", total: 1500 },
+      { label: "Scopus Q4", total: 1200 },
+      { label: "Scopus chưa xếp hạng", total: 900 },
+      { label: "ESCI (ISI không IF)", total: 1500 },
+      { label: "Tạp chí NXB uy tín (HĐCDGSNN)", total: 900 },
+      { label: "Tạp chí thuộc ĐH top 100 THE", total: 900 },
+      { label: "Tạp chí ĐH top 500 QS (KT,KD) / top 1000 (Luật)", total: 900 },
+      { label: "Tạp chí quốc tế (khác)", total: 700 },
+      { label: "ABDC hạng A*", total: 1800 },
+      { label: "ABDC hạng A", total: 1500 },
+      { label: "ABDC hạng B", total: 1200 },
+      { label: "ABDC hạng C", total: 900 },
+    ],
+  },
+  {
+    group: "6. Hội thảo chuyên ngành - TRONG NƯỚC",
+    roles: ROLES_FULL,
+    items: [
+      { label: "Toàn văn kỷ yếu CÓ ISBN", total: 600 },
+      { label: "Toàn văn kỷ yếu KHÔNG ISBN", total: 400 },
+      { label: "Không kỷ yếu - có tóm tắt trên web BTC", total: 200 },
+      { label: "Không kỷ yếu - không tóm tắt", total: 100 },
+      { label: "Seminar/tọa đàm cấp Khoa, Viện, TT", total: 100 },
+      { label: "Seminar/tọa đàm cấp Trường trở lên", total: 200 },
+    ],
+  },
+  {
+    group: "7. Hội thảo chuyên ngành - QUỐC TẾ",
+    roles: ROLES_FULL,
+    items: [
+      { label: "Toàn văn kỷ yếu CÓ ISBN", total: 1200 },
+      { label: "Toàn văn công bố trên web BTC", total: 1200 },
+      { label: "Toàn văn kỷ yếu KHÔNG ISBN", total: 600 },
+      { label: "Không kỷ yếu - có tóm tắt trên web BTC", total: 400 },
+      { label: "Không kỷ yếu - không tóm tắt", total: 200 },
+    ],
+  },
+  {
+    group: "8. Sách",
+    note: "Chủ biên / đồng tác giả chia theo n. Tái bản tính 30%.",
+    roles: ROLES_FULL, // CHINH = Chủ biên, DONG = đồng tác giả
+    sach: true,
+    items: [
+      { label: "Sách chuyên khảo tiếng nước ngoài (NXB uy tín)", total: 4500 },
+      { label: "1 chương sách phục vụ đào tạo (NXB uy tín thế giới)", total: 1200 },
+      { label: "Sách chuyên khảo trong nước", total: 3600 },
+      { label: "Giáo trình", total: 2400 },
+      { label: "Sách tham khảo", total: 1800 },
+      { label: "Sách hướng dẫn", total: 1200 },
+      { label: "Tài liệu học tập / Bài giảng (chưa có giáo trình)", total: 900 },
+      { label: "Bộ tình huống NC: NXB quốc tế uy tín (không từ cấp trường)", total: 1200 },
+      { label: "Bộ tình huống NC: NXB trong nước uy tín (không từ cấp trường)", total: 900 },
+      { label: "Bộ tình huống NC: NXB quốc tế uy tín (cấp trường)", total: 900 },
+      { label: "Bộ tình huống NC: HĐKH Trường + NXB trong nước (cấp trường)", total: 600 },
+      { label: "Bộ tình huống NC: HĐKH Trường thông qua", total: 300 },
+      { label: "Bộ tình huống NC: HĐKH Khoa thông qua", total: 100 },
+      { label: "Bộ tình huống cấp Khoa - chỉ mô tả, không HD giảng dạy", total: 50 },
+    ],
+  },
+  {
+    group: "9. Hướng dẫn NCKH sinh viên",
+    note: "Giá trị cố định cho người hướng dẫn.",
+    canhanOnly: true,
+    items: [
+      { label: "Đề tài hoàn thành cấp Khoa", canhan: 50 },
+      { label: "Đề tài hoàn thành cấp Trường", canhan: 100 },
+      { label: "Có đề tài tham gia Giải thưởng cấp Trường", canhan: 50 },
+      { label: "Giải nhất cấp Trường", canhan: 150 },
+      { label: "Giải nhì cấp Trường", canhan: 100 },
+      { label: "Giải ba cấp Trường", canhan: 50 },
+      { label: "Giải khuyến khích cấp Trường", canhan: 50 },
+      { label: "Giải nhất cấp Bộ", canhan: 200 },
+      { label: "Giải nhì cấp Bộ", canhan: 150 },
+      { label: "Giải ba cấp Bộ", canhan: 100 },
+      { label: "Giải khuyến khích cấp Bộ", canhan: 100 },
+      { label: "Eureka - giải đặc biệt", canhan: 200 },
+      { label: "Eureka - giải nhất", canhan: 150 },
+      { label: "Eureka - giải nhì", canhan: 150 },
+      { label: "Eureka - giải ba", canhan: 100 },
+      { label: "Eureka - giải khuyến khích", canhan: 100 },
+      { label: "Hướng dẫn SV bảo vệ khóa luận tốt nghiệp", canhan: 150 },
+    ],
+  },
+  {
+    group: "10. Hướng dẫn Học viên cao học",
+    canhanOnly: true,
+    items: [
+      { label: "Luận văn thạc sĩ 15 tín chỉ", canhan: 300 },
+      { label: "Luận văn thạc sĩ 7, 8 tín chỉ", canhan: 200 },
+    ],
+  },
+  {
+    group: "11. Hướng dẫn NCS bảo vệ thành công luận án TS",
+    canhanOnly: true,
+    items: [
+      { label: "Hướng dẫn 1 mình", canhan: 800 },
+      { label: "Hướng dẫn chính", canhan: 500 },
+      { label: "Hướng dẫn phụ", canhan: 300 },
+    ],
+  },
+  {
+    group: "12. Các hoạt động KHCN khác",
+    note: "Một số mục tối đa 600 giờ/người/năm. Mục chia đều theo n nếu nhiều người.",
+    items: [
+      { label: "Tư vấn chuyển giao (chia đều, tối đa 600/năm)", total: 50, chiadeu: true, cap: 600 },
+      { label: "Thâm nhập thực tiễn, phổ biến kiến thức (tối đa 600/năm)", total: 50, chiadeu: true, cap: 600 },
+      { label: "Phản biện xã hội (tối đa 600/năm)", total: 50, chiadeu: true, cap: 600 },
+      { label: "Tham gia hiệp hội khoa học / ngành nghề", canhan: 600 },
+      { label: "Tham gia ban biên tập tạp chí khoa học", canhan: 600 },
+      { label: "BTC/Ban chuyên môn Hội nghị, Hội thảo cấp Trường+ (tối đa 600/năm)", total: 50, chiadeu: true, cap: 600 },
+    ],
+  },
+];
+
+// Hệ số miễn giảm theo chức vụ (tỉ lệ định mức phải hoàn thành)
+const MIENGIAM = [
+  { label: "Giảng viên thông thường (100%)", v: 1 },
+  { label: "GV tập sự (50%)", v: 0.5 },
+  { label: "GV thai sản / chữa bệnh dài (0%)", v: 0 },
+  { label: "GV mới năm thứ nhất sau tập sự (50%)", v: 0.5 },
+  { label: "GV mới năm thứ hai sau tập sự (75%)", v: 0.75 },
+  { label: "GV chuyển môn mới theo phân công (50%)", v: 0.5 },
+  { label: "Chủ tịch HĐ trường (15%)", v: 0.15 },
+  { label: "Hiệu trưởng (15%)", v: 0.15 },
+  { label: "Bí thư đảng ủy Trường (15%)", v: 0.15 },
+  { label: "Phó CT HĐ trường (20%)", v: 0.2 },
+  { label: "Phó Hiệu trưởng (20%)", v: 0.2 },
+  { label: "Trưởng phòng / tương đương (25%)", v: 0.25 },
+  { label: "Thư ký HĐ trường (25%)", v: 0.25 },
+  { label: "Phó trưởng phòng (30%)", v: 0.3 },
+  { label: "Phó Bí thư đảng ủy Trường (30%)", v: 0.3 },
+  { label: "Bí thư/Phó BT Đoàn trường (30%)", v: 0.3 },
+  { label: "Trưởng khoa (>40GV) (60%)", v: 0.6 },
+  { label: "Bí thư liên chi đoàn thuộc Đoàn Khoa (60%)", v: 0.6 },
+  { label: "Phó CT/Phó BT Đoàn (40%)", v: 0.4 },
+  { label: "Chủ tịch hội SV (40%)", v: 0.4 },
+  { label: "Phó Chủ tịch hội SV (50%)", v: 0.5 },
+  { label: "Chủ tịch/Phó CT công đoàn (50%)", v: 0.5 },
+  { label: "Phó Trưởng khoa (>40GV) / Trưởng khoa (<40GV) (70%)", v: 0.7 },
+  { label: "Bí thư Đoàn khoa (70%)", v: 0.7 },
+  { label: "UV BCH/Tổ trưởng-phó công đoàn (75%)", v: 0.75 },
+  { label: "Phó Trưởng khoa (<40GV) (80%)", v: 0.8 },
+  { label: "Trưởng bộ môn (80%)", v: 0.8 },
+  { label: "Phó BT Đoàn khoa (80%)", v: 0.8 },
+  { label: "GV công tác quốc phòng không chuyên trách (80%)", v: 0.8 },
+  { label: "Phó Trưởng BM / Chủ nhiệm lớp / CVHT (85%)", v: 0.85 },
+  { label: "Bí thư chi bộ / Trưởng ban TTND / Trưởng ban nữ công / CT Hội (85%)", v: 0.85 },
+  { label: "Phó Bí thư chi bộ (90%)", v: 0.9 },
+];
+
+const f1 = (x) => Math.round(x * 10) / 10;
+
+function GheChiaGio({ item, roles, sach }) {
+  const [n, setN] = useState(1);
+  const [soChuBien, setSoChuBien] = useState(1);
+  const T = item.total;
+  const nn = Math.max(1, n);
+
+  const chinh = (1 / 3) * T + ((2 / 3) * T) / nn;
+  const chubien = sach
+    ? (1 / (3 * Math.max(1, soChuBien))) * T + ((2 / 3) * T) / nn
+    : null;
+  const tg1 = (1 / 6) * T + ((2 / 3) * T) / nn;
+  const dong = ((2 / 3) * T) / nn;
+
+  return (
+    <div className="rowcalc">
+      <div className="rowtop">
+        <span className="ilabel">{item.label}</span>
+        <span className="itotal">{T} giờ</span>
+      </div>
+      <div className="inputs">
+        <label>
+          Tổng số thành viên (n)
+          <input type="number" min="1" value={n}
+            onChange={(e) => setN(parseInt(e.target.value) || 1)} />
+        </label>
+        {sach && (
+          <label>
+            Số đồng chủ biên
+            <input type="number" min="1" value={soChuBien}
+              onChange={(e) => setSoChuBien(parseInt(e.target.value) || 1)} />
+          </label>
+        )}
+      </div>
+      <div className="results">
+        {roles.includes("CHINH") && (
+          <Res name={sach ? "Chủ biên (1 người)" : VAITRO.CHINH} v={chinh} />
+        )}
+        {sach && soChuBien > 1 && (
+          <Res name="Mỗi đồng chủ biên" v={chubien} />
+        )}
+        {roles.includes("TG1") && <Res name={VAITRO.TG1} v={tg1} />}
+        {roles.includes("DONG") && (
+          <Res name={sach ? "Đồng tác giả" : VAITRO.DONG} v={dong} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Res({ name, v }) {
+  return (
+    <div className="res">
+      <span>{name}</span>
+      <span className="resv">
+        {f1(v)} <em>giờ LV</em> · <b>{f1(v / HE_SO)}</b> <em>giờ chuẩn</em>
+      </span>
+    </div>
+  );
+}
+
+function GheTuyenChon({ item }) {
+  const [n, setN] = useState(2);
+  const nn = Math.max(2, n);
+  const tv = item.tv / (nn - 1);
+  return (
+    <div className="rowcalc">
+      <div className="rowtop">
+        <span className="ilabel">{item.label}</span>
+        <span className="itotal">{item.total} giờ</span>
+      </div>
+      <div className="inputs">
+        <label>
+          Tổng số thành viên (n)
+          <input type="number" min="2" value={n}
+            onChange={(e) => setN(parseInt(e.target.value) || 2)} />
+        </label>
+      </div>
+      <div className="results">
+        <Res name="Chủ nhiệm" v={item.cn} />
+        <Res name={`Mỗi thành viên khác (chia ${nn - 1})`} v={tv} />
+      </div>
+    </div>
+  );
+}
+
+function GheCanhan({ item }) {
+  return (
+    <div className="rowcalc">
+      <div className="rowtop">
+        <span className="ilabel">{item.label}</span>
+      </div>
+      <div className="results">
+        <Res name="Người thực hiện" v={item.canhan} />
+      </div>
+    </div>
+  );
+}
+
+function GheKhac({ item }) {
+  const [n, setN] = useState(1);
+  if (item.canhan != null) return <GheCanhan item={item} />;
+  const nn = Math.max(1, n);
+  const v = item.total / nn;
+  return (
+    <div className="rowcalc">
+      <div className="rowtop">
+        <span className="ilabel">{item.label}</span>
+        <span className="itotal">{item.total} giờ / lượt</span>
+      </div>
+      <div className="inputs">
+        <label>
+          Số người chia đều (n)
+          <input type="number" min="1" value={n}
+            onChange={(e) => setN(parseInt(e.target.value) || 1)} />
+        </label>
+      </div>
+      <div className="results">
+        <Res name="Mỗi người / lượt" v={v} />
+        {item.cap && <div className="cap">Trần: tối đa {item.cap} giờ LV / người / năm</div>}
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [open, setOpen] = useState(0);
+  const [mg, setMg] = useState(0); // index miễn giảm
+
+  const tile = MIENGIAM[mg].v;
+  const dinhMucCaNhan = useMemo(() => f1(GIO_CHUAN_DINH_MUC * tile), [tile]);
+
+  return (
+    <div className="wrap">
+      <style>{css}</style>
+
+      <header className="hd">
+        <div className="eyebrow">UEL · QĐ 1142/QĐ-ĐHKTL</div>
+        <h1>Tính giờ NCKH</h1>
+        <p className="sub">
+          Quy đổi hoạt động khoa học công nghệ thành giờ chuẩn nghiên cứu khoa học.
+        </p>
+      </header>
+
+      <section className="panel benchmark">
+        <div className="bm">
+          <div>
+            <div className="bmk">Định mức chuẩn</div>
+            <div className="bmv">{GIO_CHUAN_DINH_MUC} <span>giờ chuẩn/năm</span></div>
+          </div>
+          <div className="div" />
+          <div>
+            <div className="bmk">Hệ số quy đổi</div>
+            <div className="bmv">{f1(HE_SO)}<span>×</span></div>
+            <div className="bmnote">giờ làm việc ÷ {f1(HE_SO)} = giờ chuẩn</div>
+          </div>
+        </div>
+
+        <div className="mgbox">
+          <label className="mglabel">
+            Đối tượng miễn / giảm định mức
+            <select value={mg} onChange={(e) => setMg(parseInt(e.target.value))}>
+              {MIENGIAM.map((m, i) => (
+                <option key={i} value={i}>{m.label}</option>
+              ))}
+            </select>
+          </label>
+          <div className="mgresult">
+            Định mức cần hoàn thành: <b>{dinhMucCaNhan}</b> giờ chuẩn/năm
+            {tile === 0 && <span className="mgzero"> (được miễn)</span>}
+          </div>
+        </div>
+      </section>
+
+      <div className="note-global">
+        Mỗi kết quả hiển thị theo <b>giờ làm việc</b> và <b>giờ chuẩn</b> (đã chia hệ số {f1(HE_SO)}).
+        So sánh tổng giờ chuẩn đạt được với định mức ở trên để biết mức hoàn thành nhiệm vụ.
+      </div>
+
+      {DATA.map((g, gi) => (
+        <section className="panel" key={gi}>
+          <button className="ghead" onClick={() => setOpen(open === gi ? -1 : gi)}>
+            <span>{g.group}</span>
+            <span className="chev">{open === gi ? "–" : "+"}</span>
+          </button>
+          {open === gi && (
+            <div className="gbody">
+              {g.note && <div className="gnote">{g.note}</div>}
+              {g.items.map((item, ii) => {
+                if (g.canhanOnly) return <GheCanhan key={ii} item={item} />;
+                if (g.tuyenchon) return <GheTuyenChon key={ii} item={item} />;
+                if (g.group.startsWith("12.")) return <GheKhac key={ii} item={item} />;
+                return (
+                  <GheChiaGio key={ii} item={item} roles={g.roles} sach={g.sach} />
+                );
+              })}
+            </div>
+          )}
+        </section>
+      ))}
+
+      <footer className="ft">
+        Công cụ hỗ trợ tính toán nội bộ theo QĐ 1142. Kết quả mang tính tham khảo;
+        trường hợp đặc biệt (trễ hạn, không hoàn thành, thưởng nghiệm thu Tốt+) cần
+        đối chiếu bản quy định gốc và quyết định của Hội đồng đánh giá.
+      </footer>
+    </div>
+  );
+}
+
+const css = `
+:root{
+  --ink:#1a2332; --ink2:#52617a; --line:#dfe4ec; --line2:#eef1f6;
+  --bg:#f6f7fb; --card:#ffffff; --accent:#0d5c4a; --accent2:#e8f3ef;
+  --warn:#a8421f;
+}
+*{box-sizing:border-box}
+.wrap{max-width:760px;margin:0 auto;padding:18px 14px 60px;
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  color:var(--ink);background:var(--bg);}
+.hd{padding:8px 4px 18px;border-bottom:2px solid var(--ink);margin-bottom:18px}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);font-weight:700;margin-bottom:6px}
+.hd h1{margin:0;font-size:30px;line-height:1.05;letter-spacing:-.02em;font-weight:800}
+.sub{margin:8px 0 0;color:var(--ink2);font-size:14px;max-width:46ch}
+
+.panel{background:var(--card);border:1px solid var(--line);border-radius:12px;
+  margin-bottom:12px;overflow:hidden}
+.benchmark{padding:16px}
+.bm{display:flex;align-items:stretch;gap:18px;margin-bottom:14px}
+.bmk{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink2);font-weight:700}
+.bmv{font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:2px}
+.bmv span{font-size:12px;font-weight:600;color:var(--ink2);margin-left:4px}
+.bmnote{font-size:11px;color:var(--ink2);margin-top:2px}
+.div{width:1px;background:var(--line)}
+
+.mgbox{background:var(--accent2);border-radius:10px;padding:12px}
+.mglabel{display:block;font-size:12px;font-weight:700;color:var(--accent)}
+.mglabel select{display:block;width:100%;margin-top:6px;padding:9px 10px;
+  border:1px solid var(--line);border-radius:8px;font-size:13px;background:#fff;color:var(--ink)}
+.mgresult{margin-top:10px;font-size:14px}
+.mgresult b{font-size:18px;color:var(--accent)}
+.mgzero{color:var(--warn);font-weight:600}
+
+.note-global{font-size:12.5px;color:var(--ink2);background:#fff;border:1px dashed var(--line);
+  border-radius:10px;padding:11px 13px;margin-bottom:16px;line-height:1.5}
+
+.ghead{width:100%;display:flex;justify-content:space-between;align-items:center;
+  gap:10px;padding:14px 16px;background:none;border:none;cursor:pointer;
+  font-size:15px;font-weight:700;color:var(--ink);text-align:left;font-family:inherit}
+.ghead:hover{background:var(--line2)}
+.chev{font-size:20px;color:var(--accent);font-weight:700;flex-shrink:0;width:20px;text-align:center}
+.gbody{padding:0 16px 14px;border-top:1px solid var(--line2)}
+.gnote{font-size:12.5px;color:var(--ink2);margin:12px 0;line-height:1.5;
+  padding:9px 11px;background:var(--line2);border-radius:8px}
+
+.rowcalc{padding:13px 0;border-bottom:1px solid var(--line2)}
+.rowcalc:last-child{border-bottom:none}
+.rowtop{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.ilabel{font-size:13.5px;font-weight:600;line-height:1.35}
+.itotal{font-size:12px;font-weight:700;color:var(--accent);white-space:nowrap;flex-shrink:0}
+.inputs{display:flex;gap:10px;flex-wrap:wrap;margin:9px 0}
+.inputs label{font-size:11px;color:var(--ink2);font-weight:600;flex:1;min-width:130px}
+.inputs input{display:block;width:100%;margin-top:3px;padding:7px 9px;
+  border:1px solid var(--line);border-radius:7px;font-size:14px;color:var(--ink);font-family:inherit}
+.inputs input:focus,.mglabel select:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+
+.results{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.res{display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+  background:var(--line2);border-radius:7px;padding:7px 10px;font-size:12.5px}
+.res>span:first-child{color:var(--ink2);font-weight:600}
+.resv{white-space:nowrap;font-size:12px}
+.resv em{font-style:normal;color:var(--ink2);font-size:10.5px}
+.resv b{font-size:14px;color:var(--accent)}
+.cap{font-size:11px;color:var(--warn);font-weight:600;padding:2px 2px}
+
+.ft{font-size:11.5px;color:var(--ink2);line-height:1.55;margin-top:22px;
+  padding-top:14px;border-top:1px solid var(--line)}
+
+@media(max-width:480px){
+  .hd h1{font-size:25px}
+  .bm{gap:12px}
+  .bmv{font-size:21px}
+  .res{flex-direction:column;gap:1px}
+  .resv{white-space:normal}
+}
+`;
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
