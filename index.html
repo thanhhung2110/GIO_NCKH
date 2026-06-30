@@ -320,9 +320,22 @@ const f = x => Math.round(x * 10) / 10;
 
 // nhóm M1 -> để gộp tổng: "dt" đề tài | "cb" công bố | "kh" khác
 const NHOM = [{
+  id: "dexuat",
+  m1: "dt",
+  ten: "1. Đề xuất đề tài (được chọn)",
+  kind: "dexuat",
+  items: [["Cấp nhà nước", 100], ["Cấp bộ / ngành / địa phương", 50]]
+}, {
+  id: "thuyetminh",
+  m1: "dt",
+  ten: "2. Chuẩn bị thuyết minh đề tài",
+  kind: "thuyetminh",
+  // [tên, Tổng giờ, Chủ nhiệm]  — thành viên = (Tổng − CN)/(n−1) theo file Excel
+  items: [["Cấp ĐHQG - loại A", 800, 400], ["Cấp ĐHQG - loại B", 600, 300], ["Cấp ĐHQG - loại C", 400, 200], ["Cấp quốc tế", 800, 400], ["Cấp cơ sở", 200, 100], ["Cấp nhà nước", 400, 400], ["Cấp bộ / ngành", 600, 300], ["Cấp tỉnh", 400, 200]]
+}, {
   id: "detai",
   m1: "dt",
-  ten: "1+2. Đề tài (hoàn thành)",
+  ten: "3. Đề tài hoàn thành",
   kind: "shareDT",
   items: [["Cấp ĐHQG - loại A", 3600], ["Cấp ĐHQG - loại B", 1800], ["Cấp ĐHQG - loại C", 1200], ["Cấp quốc tế (≈ĐHQG B)", 1800], ["Cấp cơ sở", 600], ["Cấp nhà nước", 3600], ["Cấp bộ / ngành", 1800], ["Cấp tỉnh", 1800]]
 }, {
@@ -380,6 +393,38 @@ function tinh(nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong) {
     nn = Math.max(1, n);
   const steps = [];
   let lv = 0;
+  if (nhom.kind === "dexuat") {
+    // QĐ 1142 Điều 8.1: chỉ chủ nhiệm hưởng giờ đề xuất
+    if (vaitro === "chinh") {
+      lv = T;
+      steps.push(`Chỉ chủ nhiệm hưởng giờ đề xuất = ${T} giờ (QĐ 1142, Điều 8.1)`);
+    } else {
+      lv = 0;
+      steps.push(`Thành viên không được tính giờ ở bước đề xuất (chỉ chủ nhiệm)`);
+    }
+    return {
+      lv,
+      steps
+    };
+  }
+  if (nhom.kind === "thuyetminh") {
+    // Theo file Excel: Tổng = item[1], Chủ nhiệm = item[2], thành viên = (Tổng − CN)/(n−1)
+    const cn = item[2];
+    if (vaitro === "chinh") {
+      lv = cn;
+      steps.push(`Chủ nhiệm = ${cn} giờ`);
+    } else {
+      const pool = T - cn;
+      const chia = Math.max(1, nn - 1);
+      lv = pool / chia;
+      steps.push(`Phần thành viên = Tổng ${T} − Chủ nhiệm ${cn} = ${f(pool)} giờ`);
+      steps.push(`Chia đều ${nn - 1 > 0 ? nn - 1 : 1} thành viên = ${f(lv)} giờ`);
+    }
+    return {
+      lv,
+      steps
+    };
+  }
   if (nhom.kind === "fixed") {
     lv = T * (soLuong || 1);
     steps.push(`Định mức cố định ${T} giờ` + ((soLuong || 1) > 1 ? ` × ${soLuong} = ${f(lv)} giờ` : ""));
@@ -405,15 +450,13 @@ function tinh(nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong) {
   }
   const phanChung = 2 / 3 * T,
     chiaChung = phanChung / nn;
-  // Bài báo quốc tế: tác giả liên hệ được xem là đồng tác giả chính.
-  // Phần riêng ⅓·T chia đôi cho 2 tác giả chính → mỗi người ⅙·T + phần chung.
   const qt2tg = nhom.id === "baibao_qt";
   if (vaitro === "chinh") {
     const tenR = nhom.sach ? "chủ biên" : nhom.kind === "shareDT" ? "chủ nhiệm" : "tác giả chính";
     if (qt2tg) {
       const rieng = 1 / 6 * T;
       lv = rieng + chiaChung;
-      steps.push(`Có 2 tác giả chính → ⅓ chia đôi: ⅓ × ${T} ÷ 2 = ${f(rieng)} giờ`);
+      steps.push(`Có 2 tác giả chính (TG chính + TG liên hệ) → ⅓ chia đôi: ⅓ × ${T} ÷ 2 = ${f(rieng)} giờ`);
       steps.push(`Phần chung = ⅔ × ${T} ÷ ${nn} = ${f(chiaChung)} giờ`);
       steps.push(`Cộng = ${f(lv)} giờ`);
     } else if (nhom.sach && soChuBien > 1) {
@@ -474,17 +517,20 @@ function App() {
   const [tot, setTot] = useState(false);
   const [ten, setTen] = useState("");
   const [rows, setRows] = useState([]); // danh sách đã thêm
+  const [moRong, setMoRong] = useState({}); // id -> bool, dòng đang xem cách tính
 
   const nhom = NHOM.find(x => x.id === nhomId);
   const item = nhom.items[Math.min(itemIdx, nhom.items.length - 1)];
   const kq = useMemo(() => tinh(nhom, item, vaitro, n, soChuBien, treHan === "no" ? null : treHan, tot, soLuong), [nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong]);
-  const showVaitro = ["share3", "shareDT"].includes(nhom.kind);
-  const showN = ["share3", "shareDT", "split"].includes(nhom.kind) && !(showVaitro && vaitro === "chinh" && false);
+  const showVaitro = ["share3", "shareDT", "dexuat", "thuyetminh"].includes(nhom.kind);
+  const showN = ["share3", "shareDT", "split", "thuyetminh"].includes(nhom.kind) && !(showVaitro && vaitro === "chinh" && false);
   function them() {
     setRows([...rows, {
       id: Date.now(),
       m1: nhom.m1,
       nhomTen: nhom.ten,
+      kind: nhom.kind,
+      sach: !!nhom.sach,
       item: item[0],
       ten: ten || item[0],
       vaitro: showVaitro ? vaitro : null,
@@ -510,7 +556,13 @@ function App() {
       all: g.dt + g.cb + g.kh
     };
   }, [rows]);
-  const nhanVaitro = v => v === "chinh" ? nhom.sach ? "Chủ biên" : nhom.kind === "shareDT" ? "Chủ nhiệm" : "Tác giả chính" : v === "tg1" ? "Tác giả liên hệ" : nhom.kind === "shareDT" ? "Thành viên" : "Đồng tác giả";
+  const nhanVaitro = v => v === "chinh" ? nhom.sach ? "Chủ biên" : ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Chủ nhiệm" : "Tác giả chính" : v === "tg1" ? "Tác giả liên hệ" : ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Thành viên" : "Đồng tác giả";
+  const nhanVaitro2 = r => {
+    const v = r.vaitro;
+    if (v === "chinh") return r.sach ? "Chủ biên" : ["shareDT", "dexuat", "thuyetminh"].includes(r.kind) ? "Chủ nhiệm" : "Tác giả chính";
+    if (v === "tg1") return "Tác giả liên hệ";
+    return ["shareDT", "dexuat", "thuyetminh"].includes(r.kind) ? "Thành viên" : "Đồng tác giả";
+  };
   return /*#__PURE__*/React.createElement("div", {
     className: "wrap"
   }, /*#__PURE__*/React.createElement("style", null, css), /*#__PURE__*/React.createElement("header", {
@@ -546,7 +598,7 @@ function App() {
   }, nhom.items.map((it, i) => /*#__PURE__*/React.createElement("option", {
     key: i,
     value: i
-  }, it[0], " — ", it[1], " giờ")))), /*#__PURE__*/React.createElement("label", {
+  }, it[0], " — ", nhom.kind === "thuyetminh" ? `CN ${it[2]} giờ` : nhom.kind === "dexuat" ? `${it[1]} giờ (chỉ CN)` : `${it[1]} giờ`)))), /*#__PURE__*/React.createElement("label", {
     className: "fl"
   }, "Tên cụ thể (tuỳ chọn, để ghi vào bảng)", /*#__PURE__*/React.createElement("input", {
     type: "text",
@@ -560,13 +612,13 @@ function App() {
   }, /*#__PURE__*/React.createElement("button", {
     className: vaitro === "chinh" ? "on" : "",
     onClick: () => setVaitro("chinh")
-  }, nhom.sach ? "Chủ biên" : nhom.kind === "shareDT" ? "Chủ nhiệm" : "Tác giả chính"), nhom.kind === "share3" && /*#__PURE__*/React.createElement("button", {
+  }, nhom.sach ? "Chủ biên" : ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Chủ nhiệm" : "Tác giả chính"), nhom.kind === "share3" && /*#__PURE__*/React.createElement("button", {
     className: vaitro === "tg1" ? "on" : "",
     onClick: () => setVaitro("tg1")
   }, nhom.id === "baibao_qt" ? "Tác giả liên hệ (≈chính)" : "Tác giả liên hệ"), /*#__PURE__*/React.createElement("button", {
     className: vaitro === "dong" ? "on" : "",
     onClick: () => setVaitro("dong")
-  }, nhom.kind === "shareDT" ? "Thành viên" : "Đồng tác giả"))), showN && !(showVaitro && vaitro === "chinh" && false) && /*#__PURE__*/React.createElement("div", {
+  }, ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Thành viên" : "Đồng tác giả"))), showN && !(showVaitro && vaitro === "chinh" && false) && /*#__PURE__*/React.createElement("div", {
     className: "fl"
   }, /*#__PURE__*/React.createElement("span", null, nhom.kind === "split" ? "Số người chia đều" : "Tổng số người (n)"), /*#__PURE__*/React.createElement("div", {
     className: "counter"
@@ -639,24 +691,60 @@ function App() {
     className: "right"
   }, rows.length === 0 ? /*#__PURE__*/React.createElement("div", {
     className: "empty"
-  }, "Chưa có hoạt động nào. Thêm từ form bên trái để bắt đầu kê khai.") : /*#__PURE__*/React.createElement("div", {
+  }, "Chưa có hoạt động nào. Thêm từ form bên trái để bắt đầu kê khai.") : [{
+    m1: "dt",
+    nhan: "Mục 1 + 2 — Đề tài NCKH",
+    tongKey: "dt"
+  }, {
+    m1: "cb",
+    nhan: "Mục 3 + 4 + 5 + 6 — Công bố khoa học",
+    tongKey: "cb"
+  }, {
+    m1: "kh",
+    nhan: "Mục 7 → 12 — Hoạt động khác",
+    tongKey: "kh"
+  }].filter(grp => rows.some(r => r.m1 === grp.m1)).map(grp => /*#__PURE__*/React.createElement("div", {
+    key: grp.m1,
     className: "tablecard"
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Hoạt động"), /*#__PURE__*/React.createElement("th", null, "Vai trò"), /*#__PURE__*/React.createElement("th", {
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grphead"
+  }, /*#__PURE__*/React.createElement("span", null, grp.nhan), /*#__PURE__*/React.createElement("b", null, f(tong[grp.tongKey]), " giờ")), /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Hoạt động"), /*#__PURE__*/React.createElement("th", null, "Vai trò"), /*#__PURE__*/React.createElement("th", {
     className: "r"
-  }, "Giờ"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, rows.map(r => /*#__PURE__*/React.createElement("tr", {
-    key: r.id
+  }, "Giờ"), /*#__PURE__*/React.createElement("th", null))), /*#__PURE__*/React.createElement("tbody", null, rows.filter(r => r.m1 === grp.m1).map(r => [/*#__PURE__*/React.createElement("tr", {
+    key: r.id,
+    className: "datarow" + (moRong[r.id] ? " open" : ""),
+    onClick: () => setMoRong(m => ({
+      ...m,
+      [r.id]: !m[r.id]
+    }))
   }, /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("div", {
     className: "tt"
-  }, r.ten), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "caret"
+  }, moRong[r.id] ? "▾" : "▸"), " ", r.ten), /*#__PURE__*/React.createElement("div", {
     className: "ts"
   }, r.item)), /*#__PURE__*/React.createElement("td", {
     className: "vt"
-  }, r.vaitro ? nhanVaitro(r.vaitro) : "—"), /*#__PURE__*/React.createElement("td", {
+  }, r.vaitro ? nhanVaitro2(r) : "—"), /*#__PURE__*/React.createElement("td", {
     className: "r num"
   }, r.lv), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("button", {
     className: "del",
-    onClick: () => xoa(r.id)
-  }, "×"))))))), /*#__PURE__*/React.createElement("div", {
+    onClick: e => {
+      e.stopPropagation();
+      xoa(r.id);
+    }
+  }, "×"))), moRong[r.id] && /*#__PURE__*/React.createElement("tr", {
+    key: r.id + "_d",
+    className: "exprow"
+  }, /*#__PURE__*/React.createElement("td", {
+    colSpan: 4
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "exptitle"
+  }, "Cách tính"), /*#__PURE__*/React.createElement("ul", {
+    className: "explist"
+  }, (r.steps || []).map((s, i) => /*#__PURE__*/React.createElement("li", {
+    key: i
+  }, s)))))]))))), /*#__PURE__*/React.createElement("div", {
     className: "totals"
   }, /*#__PURE__*/React.createElement("div", {
     className: "trow"
@@ -740,6 +828,16 @@ tbody td{padding:11px 13px;border-top:1px solid var(--line2);vertical-align:top}
 .trow.grand{border-bottom:none;border-top:2px solid var(--ink);margin-top:2px;color:var(--ink);font-size:14px}
 .trow.grand b{font-size:22px;color:var(--ac)}
 
+.grphead{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;
+  background:var(--ac);color:#fff;font-size:13px;font-weight:700}
+.grphead b{font-size:14px;font-weight:800}
+.datarow{cursor:pointer}
+.datarow:hover{background:var(--line2)}
+.datarow.open{background:var(--ac2)}
+.caret{color:var(--ac);font-size:11px;font-weight:700}
+.exprow td{background:var(--ac2);border-top:none;padding:0 14px 12px 26px}
+.exptitle{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ac);margin:2px 0 6px}
+.explist{margin:0;padding-left:18px;font-size:12px;line-height:1.7;color:var(--ink)}
 .ft{font-size:11.5px;color:var(--ink2);line-height:1.55;margin-top:20px;padding-top:14px;border-top:1px solid var(--line)}
 `;
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
