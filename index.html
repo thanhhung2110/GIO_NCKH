@@ -388,7 +388,7 @@ const NHOM = [{
   kind: "split",
   items: [["Tư vấn chuyển giao", 50, 600], ["Thâm nhập thực tiễn, phổ biến kiến thức", 50, 600], ["Phản biện xã hội", 50, 600], ["BTC/Ban chuyên môn Hội nghị cấp Trường+", 50, 600], ["Hiệp hội khoa học / ngành nghề", 600, null], ["Ban biên tập tạp chí khoa học", 600, null]]
 }];
-function tinh(nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong) {
+function tinh(nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong, kiem) {
   const T = item[1],
     nn = Math.max(1, n);
   const steps = [];
@@ -450,7 +450,7 @@ function tinh(nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong) {
   }
   const phanChung = 2 / 3 * T,
     chiaChung = phanChung / nn;
-  const qt2tg = nhom.id === "baibao_qt";
+  const qt2tg = nhom.id === "baibao_qt" && !kiem;
   if (vaitro === "chinh") {
     const tenR = nhom.sach ? "chủ biên" : nhom.kind === "shareDT" ? "chủ nhiệm" : "tác giả chính";
     if (qt2tg) {
@@ -468,7 +468,11 @@ function tinh(nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong) {
     } else {
       const rieng = 1 / 3 * T;
       lv = rieng + chiaChung;
-      steps.push(`Phần riêng ${tenR} = ⅓ × ${T} = ${f(rieng)} giờ`);
+      if (nhom.id === "baibao_qt" && kiem) {
+        steps.push(`1 người vừa là tác giả chính vừa là tác giả liên hệ → hưởng trọn ⅓ × ${T} = ${f(rieng)} giờ`);
+      } else {
+        steps.push(`Phần riêng ${tenR} = ⅓ × ${T} = ${f(rieng)} giờ`);
+      }
       steps.push(`Phần chung = ⅔ × ${T} ÷ ${nn} = ${f(chiaChung)} giờ`);
       steps.push(`Cộng = ${f(lv)} giờ`);
     }
@@ -515,13 +519,14 @@ function App() {
   const [soLuong, setSoLuong] = useState(1);
   const [treHan, setTreHan] = useState("no");
   const [tot, setTot] = useState(false);
+  const [kiem, setKiem] = useState(false); // bài báo QT: 1 người vừa là TG chính vừa là TG liên hệ
   const [ten, setTen] = useState("");
   const [rows, setRows] = useState([]); // danh sách đã thêm
   const [moRong, setMoRong] = useState({}); // id -> bool, dòng đang xem cách tính
 
   const nhom = NHOM.find(x => x.id === nhomId);
   const item = nhom.items[Math.min(itemIdx, nhom.items.length - 1)];
-  const kq = useMemo(() => tinh(nhom, item, vaitro, n, soChuBien, treHan === "no" ? null : treHan, tot, soLuong), [nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong]);
+  const kq = useMemo(() => tinh(nhom, item, vaitro, n, soChuBien, treHan === "no" ? null : treHan, tot, soLuong, kiem), [nhom, item, vaitro, n, soChuBien, treHan, tot, soLuong, kiem]);
   const showVaitro = ["share3", "shareDT", "dexuat", "thuyetminh"].includes(nhom.kind);
   const showN = ["share3", "shareDT", "split", "thuyetminh"].includes(nhom.kind) && !(showVaitro && vaitro === "chinh" && false);
   function them() {
@@ -612,13 +617,20 @@ function App() {
   }, /*#__PURE__*/React.createElement("button", {
     className: vaitro === "chinh" ? "on" : "",
     onClick: () => setVaitro("chinh")
-  }, nhom.sach ? "Chủ biên" : ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Chủ nhiệm" : "Tác giả chính"), nhom.kind === "share3" && /*#__PURE__*/React.createElement("button", {
+  }, nhom.sach ? "Chủ biên" : ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Chủ nhiệm" : "Tác giả chính"), nhom.kind === "share3" && !(nhom.id === "baibao_qt" && kiem) && /*#__PURE__*/React.createElement("button", {
     className: vaitro === "tg1" ? "on" : "",
     onClick: () => setVaitro("tg1")
   }, nhom.id === "baibao_qt" ? "Tác giả liên hệ (≈chính)" : "Tác giả liên hệ"), /*#__PURE__*/React.createElement("button", {
     className: vaitro === "dong" ? "on" : "",
     onClick: () => setVaitro("dong")
-  }, ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Thành viên" : "Đồng tác giả"))), showN && !(showVaitro && vaitro === "chinh" && false) && /*#__PURE__*/React.createElement("div", {
+  }, ["shareDT", "dexuat", "thuyetminh"].includes(nhom.kind) ? "Thành viên" : "Đồng tác giả"))), nhom.id === "baibao_qt" && /*#__PURE__*/React.createElement("label", {
+    className: "check",
+    style: { marginBottom: "12px" }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: kiem,
+    onChange: e => { setKiem(e.target.checked); if (e.target.checked && vaitro === "tg1") setVaitro("chinh"); }
+  }, ), "Tác giả chính kiêm luôn tác giả liên hệ (chỉ 1 tác giả chính)"), showN && !(showVaitro && vaitro === "chinh" && false) && /*#__PURE__*/React.createElement("div", {
     className: "fl"
   }, /*#__PURE__*/React.createElement("span", null, nhom.kind === "split" ? "Số người chia đều" : "Tổng số người (n)"), /*#__PURE__*/React.createElement("div", {
     className: "counter"
